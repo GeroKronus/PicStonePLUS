@@ -971,56 +971,31 @@ namespace PicStonePlus.Forms
                     if (preset.PictureControlIndex >= 0)
                         _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl, preset.PictureControlIndex);
 
-                    // Diagnóstico: ler WBMode atual e opções disponíveis
-                    List<string> wbOptions;
-                    int wbCurrentIdx;
-                    _nikonManager.GetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, out wbOptions, out wbCurrentIdx);
-                    LogUI($"ApplyPreset: WBMode ANTES: index={wbCurrentIdx}, total={wbOptions.Count}");
-                    for (int i = 0; i < wbOptions.Count; i++)
-                        LogUI($"  WBMode[{i}]={wbOptions[i]}{(i == wbCurrentIdx ? " <<<ATUAL" : "")}");
-
                     // Temperatura de cor (conforme PicStone)
-                    LogUI($"ApplyPreset: Temperatura={preset.Temperatura}");
                     if (preset.Temperatura == 0)
                     {
                         // WBMode = Auto (index 0)
-                        bool wbOk = _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, 0);
-                        LogUI($"ApplyPreset: WBMode=Auto(0) result={wbOk}");
+                        _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, 0);
                     }
                     else
                     {
                         // WBMode = Kelvin/Custom (index 13, conforme PicStone)
-                        bool wbOk = _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, 13);
-                        LogUI($"ApplyPreset: WBMode=Kelvin(13) result={wbOk}");
+                        _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, 13);
 
-                        // Verificar se WBMode mudou
-                        _nikonManager.GetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, out wbOptions, out wbCurrentIdx);
-                        LogUI($"ApplyPreset: WBMode DEPOIS: index={wbCurrentIdx} = {(wbCurrentIdx >= 0 && wbCurrentIdx < wbOptions.Count ? wbOptions[wbCurrentIdx] : "?")}");
-
+                        // D7100: WBTuneColorTemp como Enum (index-based)
                         // D7500/D7200: WBTuneColorTempEx como Range (valor direto em Kelvin)
-                        // D7100: WBTuneColorTemp como Enum (index-based) - tratado separadamente
                         string cameraName = _nikonManager.GetCameraName();
                         if (cameraName != null && cameraName.Contains("D7100"))
                         {
-                            // D7100: index = temperatura - 1
-                            bool tOk = _nikonManager.SetEnumCapability(
+                            _nikonManager.SetEnumCapability(
                                 (uint)eNkMAIDCapability.kNkMAIDCapability_WBTuneColorTemp,
                                 (int)preset.Temperatura - 1);
-                            LogUI($"ApplyPreset: WBTuneColorTemp index={preset.Temperatura - 1} result={tOk}");
                         }
                         else
                         {
-                            // D7500/D7200: valor direto em Kelvin
-                            bool tOk = _nikonManager.SetRangeCapability(
+                            _nikonManager.SetRangeCapability(
                                 (uint)eNkMAIDCapability.kNkMAIDCapability_WBTuneColorTempEx,
                                 preset.Temperatura);
-                            LogUI($"ApplyPreset: WBTuneColorTempEx={preset.Temperatura}K result={tOk}");
-
-                            // Readback
-                            double readVal, lo, hi; uint st;
-                            _nikonManager.GetRangeCapability((uint)eNkMAIDCapability.kNkMAIDCapability_WBTuneColorTempEx,
-                                out readVal, out lo, out hi, out st);
-                            LogUI($"ApplyPreset: WBTuneColorTempEx READBACK={readVal}K (range {lo}-{hi})");
                         }
                     }
                 });

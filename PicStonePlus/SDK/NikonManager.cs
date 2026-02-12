@@ -1659,10 +1659,20 @@ namespace PicStonePlus.SDK
                     }
 
                     var range = Marshal.PtrToStructure<NkMAIDRange>(pRange);
-                    value = range.lfValue;
                     lower = range.lfLower;
                     upper = range.lfUpper;
                     steps = range.ulSteps;
+
+                    // Conforme wrapper PicStone: range discreta usa ulValueIndex, não lfValue
+                    if (range.ulSteps > 0 && range.ulSteps > 1)
+                    {
+                        double delta = (range.lfUpper - range.lfLower) / (range.ulSteps - 1);
+                        value = range.lfLower + range.ulValueIndex * delta;
+                    }
+                    else
+                    {
+                        value = range.lfValue;
+                    }
 
                     Marshal.FreeHGlobal(pRange);
                     return true;
@@ -1697,7 +1707,24 @@ namespace PicStonePlus.SDK
                 }
 
                 var range = Marshal.PtrToStructure<NkMAIDRange>(pRange);
-                range.lfValue = value;
+
+                // Conforme wrapper PicStone (NikonTypes.cs):
+                // - ulSteps == 0 → range contínua, setar lfValue
+                // - ulSteps > 0  → range discreta, setar ulValueIndex (SDK ignora lfValue!)
+                if (range.ulSteps == 0)
+                {
+                    range.lfValue = value;
+                }
+                else
+                {
+                    // IndexFromValue: (value - lower) / delta, delta = (upper - lower) / (steps - 1)
+                    double delta = (range.lfUpper - range.lfLower) / (range.ulSteps - 1);
+                    uint index = (uint)Math.Floor((value - range.lfLower) / delta);
+                    if (index >= range.ulSteps) index = range.ulSteps - 1;
+                    range.ulValueIndex = index;
+                    Log($"SetRangeCapability: cap 0x{capId:X} value={value} → index={index} (steps={range.ulSteps}, lower={range.lfLower}, upper={range.lfUpper}, delta={delta})");
+                }
+
                 Marshal.StructureToPtr(range, pRange, false);
 
                 bool ok = CommandCapSet(_pSourceObject, capId, eNkMAIDDataType.kNkMAIDDataType_RangePtr, pRange);
