@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+
+# Debug files
+*.pdb
+*.log
+
+# NuGet
+packages/
+
+# OS files
+Thumbs.db
+Desktop.ini
+nul
+
+# Presets (runtime data)
+presets.json
+last_module.txt
