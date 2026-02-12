@@ -948,30 +948,19 @@ namespace PicStonePlus.Forms
         }
 
         /// <summary>
-        /// Busca o índice de um valor textual no enum da câmera.
+        /// Busca o valor textual no enum da câmera e seta o índice raw correto.
         /// Se o texto não for encontrado, usa o índice fallback do preset.
-        /// Isso permite que presets funcionem entre D7200 e D7500 (índices diferentes).
+        /// Isso permite que presets funcionem entre D7200 e D7500 (índices diferentes)
+        /// e também com listas filtradas (ex: PictureControl sem Monochrome/Portrait).
         /// </summary>
         private void SetEnumByText(uint capId, string text, int fallbackIndex)
         {
-            List<string> options;
-            int currentIndex;
-            if (_nikonManager.GetEnumCapability(capId, out options, out currentIndex))
+            if (!_nikonManager.SetEnumByText(capId, text))
             {
-                // Busca exata
-                for (int i = 0; i < options.Count; i++)
-                {
-                    if (options[i] == text)
-                    {
-                        _nikonManager.SetEnumCapability(capId, i);
-                        return;
-                    }
-                }
+                // Fallback: usar índice original (câmera pode ser a mesma)
+                if (fallbackIndex >= 0)
+                    _nikonManager.SetEnumCapability(capId, fallbackIndex);
             }
-
-            // Fallback: usar índice original (câmera pode ser a mesma)
-            if (fallbackIndex >= 0)
-                _nikonManager.SetEnumCapability(capId, fallbackIndex);
         }
 
         private async Task ApplyPresetAsync(MaterialPreset preset)

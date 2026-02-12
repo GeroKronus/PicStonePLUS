@@ -1383,7 +1383,6 @@ namespace PicStonePlus.SDK
                         }
 
                         var stEnum = Marshal.PtrToStructure<NkMAIDEnum>(pEnum);
-                        currentIndex = (int)stEnum.ulValue;
 
                         // Validar metadata antes de alocar
                         if (stEnum.ulElements == 0 || stEnum.wPhysicalBytes <= 0)
@@ -1429,11 +1428,18 @@ namespace PicStonePlus.SDK
                                 else
                                     val = Marshal.ReadByte(stEnum.pData, (int)i);
 
-                                options.Add(GetEnumValueString(capId, val));
+                                string text = GetEnumValueString(capId, val);
+                                if (text != null)
+                                {
+                                    if (i == stEnum.ulValue)
+                                        currentIndex = options.Count;
+                                    options.Add(text);
+                                }
                             }
                         }
                         else if (stEnum.ulType == (uint)eNkMAIDArrayType.kNkMAIDArrayType_PackedString)
                         {
+                            currentIndex = (int)stEnum.ulValue;
                             int offset = 0;
                             for (uint i = 0; i < stEnum.ulElements; i++)
                             {
@@ -1444,6 +1450,7 @@ namespace PicStonePlus.SDK
                         }
                         else
                         {
+                            currentIndex = (int)stEnum.ulValue;
                             for (uint i = 0; i < stEnum.ulElements; i++)
                                 options.Add($"#{i}");
                         }
@@ -1550,6 +1557,103 @@ namespace PicStonePlus.SDK
                     break;
             }
             return list;
+        }
+
+        /// <summary>
+        /// Seta uma capability Enum buscando pelo texto do valor.
+        /// Necessário quando a lista do combo é filtrada (ex: PictureControl sem Monochrome/Portrait).
+        /// </summary>
+        public bool SetEnumByText(uint capId, string text)
+        {
+            lock (_sdkLock)
+            {
+                if (!_isSourceOpen) return false;
+
+                uint capType = GetCapabilityType(_sourceCapabilities, capId);
+                if (capType == (uint)eNkMAIDCapType.kNkMAIDCapType_Unsigned)
+                {
+                    // Para Unsigned, buscar no mapa de valores
+                    List<string> options;
+                    int curIdx;
+                    if (GetEnumCapability(capId, out options, out curIdx))
+                    {
+                        for (int i = 0; i < options.Count; i++)
+                        {
+                            if (options[i] == text)
+                                return SetUnsignedFromEnum(capId, i);
+                        }
+                    }
+                    return false;
+                }
+
+                // Tipo Enum: ler pData completo (sem filtro) e buscar o valor pelo texto
+                IntPtr pEnum = Marshal.AllocHGlobal(Marshal.SizeOf<NkMAIDEnum>());
+
+                if (!CommandCapGet(_pSourceObject, capId, eNkMAIDDataType.kNkMAIDDataType_EnumPtr, pEnum))
+                {
+                    Marshal.FreeHGlobal(pEnum);
+                    return false;
+                }
+
+                var stEnum = Marshal.PtrToStructure<NkMAIDEnum>(pEnum);
+
+                IntPtr pData = IntPtr.Zero;
+                if (stEnum.ulElements > 0 && stEnum.wPhysicalBytes > 0)
+                {
+                    int dataSize = (int)(stEnum.ulElements * stEnum.wPhysicalBytes);
+                    pData = Marshal.AllocHGlobal(dataSize);
+                    stEnum.pData = pData;
+                    Marshal.StructureToPtr(stEnum, pEnum, false);
+
+                    if (!CommandCapGetArray(_pSourceObject, capId, eNkMAIDDataType.kNkMAIDDataType_EnumPtr, pEnum))
+                    {
+                        Marshal.FreeHGlobal(pData);
+                        Marshal.FreeHGlobal(pEnum);
+                        return false;
+                    }
+
+                    stEnum = Marshal.PtrToStructure<NkMAIDEnum>(pEnum);
+                }
+
+                // Buscar o índice raw cujo texto corresponde
+                int foundIndex = -1;
+                if (stEnum.ulType == (uint)eNkMAIDArrayType.kNkMAIDArrayType_Unsigned && pData != IntPtr.Zero)
+                {
+                    for (uint i = 0; i < stEnum.ulElements; i++)
+                    {
+                        uint val;
+                        if (stEnum.wPhysicalBytes == 4)
+                            val = (uint)Marshal.ReadInt32(pData, (int)(i * 4));
+                        else if (stEnum.wPhysicalBytes == 2)
+                            val = (uint)Marshal.ReadInt16(pData, (int)(i * 2));
+                        else
+                            val = Marshal.ReadByte(pData, (int)i);
+
+                        string valText = GetEnumValueString(capId, val);
+                        if (valText == text)
+                        {
+                            foundIndex = (int)i;
+                            break;
+                        }
+                    }
+                }
+
+                if (foundIndex < 0)
+                {
+                    if (pData != IntPtr.Zero) Marshal.FreeHGlobal(pData);
+                    Marshal.FreeHGlobal(pEnum);
+                    Log($"SetEnumByText: texto '{text}' não encontrado para 0x{capId:X}");
+                    return false;
+                }
+
+                stEnum.ulValue = (uint)foundIndex;
+                Marshal.StructureToPtr(stEnum, pEnum, false);
+                bool ok = CommandCapSet(_pSourceObject, capId, eNkMAIDDataType.kNkMAIDDataType_EnumPtr, pEnum);
+
+                if (pData != IntPtr.Zero) Marshal.FreeHGlobal(pData);
+                Marshal.FreeHGlobal(pEnum);
+                return ok;
+            }
         }
 
         public bool SetEnumCapability(uint capId, int index)
@@ -1766,11 +1870,11 @@ namespace PicStonePlus.SDK
                         case 1: return "Standard 0";
                         case 2: return "Neutral 0";
                         case 3: return "Vivid 0";
-                        case 4: return "Monochrome";
-                        case 5: return "Portrait";
-                        case 6: return "Landscape";
-                        case 7: return "Flat";
-                        case 8: return "Auto";
+                        case 4: return null; // Monochrome - não usado
+                        case 5: return null; // Portrait - não usado
+                        case 6: return null; // Landscape - não usado
+                        case 7: return null; // Flat - não usado
+                        case 8: return null; // Auto - não usado
                         case 201: return "Vivid sat -1";
                         case 202: return "Vivid sat -2";
                         case 203: return "Standard sat -1";
