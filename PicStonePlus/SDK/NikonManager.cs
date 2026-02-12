@@ -1763,14 +1763,23 @@ namespace PicStonePlus.SDK
                 case (uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl:
                     switch (value)
                     {
-                        case 1: return "Standard";
-                        case 2: return "Neutral";
-                        case 3: return "Vivid";
+                        case 1: return "Standard 0";
+                        case 2: return "Neutral 0";
+                        case 3: return "Vivid 0";
                         case 4: return "Monochrome";
                         case 5: return "Portrait";
                         case 6: return "Landscape";
                         case 7: return "Flat";
                         case 8: return "Auto";
+                        case 201: return "Vivid sat -1";
+                        case 202: return "Vivid sat -2";
+                        case 203: return "Standard sat -1";
+                        case 204: return "Standard sat -2";
+                        case 205: return "Neutral sat -1";
+                        case 206: return "Neutral sat -2";
+                        case 207: return "Super Vivid 1";
+                        case 208: return "Super Vivid 2";
+                        case 209: return "Super Neutral";
                         default: return $"PicCtrl {value}";
                     }
                 default:
