@@ -160,6 +160,7 @@ namespace PicStonePlus.Forms
                 ISOText = cboISO.SelectedIndex >= 0 ? cboISO.Text : "",
                 ApertureText = cboAbertura.SelectedIndex >= 0 ? cboAbertura.Text : "",
                 ShutterSpeedText = cboVelocidade.SelectedIndex >= 0 ? cboVelocidade.Text : "",
+                PictureControlText = cboPictureControl.SelectedIndex >= 0 ? cboPictureControl.Text : "",
 
                 Brilho = (int)nudBrilho.Value,
                 Contraste = (int)nudContraste.Value,

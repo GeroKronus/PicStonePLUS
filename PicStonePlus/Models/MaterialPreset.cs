@@ -11,17 +11,18 @@ namespace PicStonePlus.Models
         // Identificação
         public string Nome { get; set; }
 
-        // Configurações de câmera (índice enum 0-based, conforme combo populado pela câmera)
+        // Configurações de câmera - índices são fallback, textos são usados para busca cross-camera
         public int ISOIndex { get; set; }
         public int ApertureIndex { get; set; }
         public int ShutterSpeedIndex { get; set; }
         public int PictureControlIndex { get; set; }
         public double Temperatura { get; set; } // 0 = WB Auto, >0 = Kelvin (D7500/D7200: Range)
 
-        // Textos descritivos (para legibilidade no JSON, não usados na aplicação)
+        // Valores textuais (usados para aplicar presets entre câmeras diferentes)
         public string ISOText { get; set; }
         public string ApertureText { get; set; }
         public string ShutterSpeedText { get; set; }
+        public string PictureControlText { get; set; }
 
         // Pós-produção (processamento em software, não enviados à câmera)
         public int Brilho { get; set; }

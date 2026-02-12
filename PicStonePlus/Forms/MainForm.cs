@@ -947,6 +947,33 @@ namespace PicStonePlus.Forms
                 _ = ApplyPresetAsync(preset);
         }
 
+        /// <summary>
+        /// Busca o índice de um valor textual no enum da câmera.
+        /// Se o texto não for encontrado, usa o índice fallback do preset.
+        /// Isso permite que presets funcionem entre D7200 e D7500 (índices diferentes).
+        /// </summary>
+        private void SetEnumByText(uint capId, string text, int fallbackIndex)
+        {
+            List<string> options;
+            int currentIndex;
+            if (_nikonManager.GetEnumCapability(capId, out options, out currentIndex))
+            {
+                // Busca exata
+                for (int i = 0; i < options.Count; i++)
+                {
+                    if (options[i] == text)
+                    {
+                        _nikonManager.SetEnumCapability(capId, i);
+                        return;
+                    }
+                }
+            }
+
+            // Fallback: usar índice original (câmera pode ser a mesma)
+            if (fallbackIndex >= 0)
+                _nikonManager.SetEnumCapability(capId, fallbackIndex);
+        }
+
         private async Task ApplyPresetAsync(MaterialPreset preset)
         {
             SetStatus($"Aplicando preset: {preset.Nome}...");
@@ -955,20 +982,22 @@ namespace PicStonePlus.Forms
             {
                 await Task.Run(() =>
                 {
-                    // ISO (conforme PicStone: PorMaterial)
-                    if (preset.ISOIndex >= 0)
-                        _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_Sensitivity, preset.ISOIndex);
+                    // ISO - buscar por valor textual (índices diferem entre D7200 e D7500)
+                    if (!string.IsNullOrEmpty(preset.ISOText))
+                        SetEnumByText((uint)eNkMAIDCapability.kNkMAIDCapability_Sensitivity, preset.ISOText, preset.ISOIndex);
 
                     // Abertura
-                    if (preset.ApertureIndex >= 0)
-                        _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_Aperture, preset.ApertureIndex);
+                    if (!string.IsNullOrEmpty(preset.ApertureText))
+                        SetEnumByText((uint)eNkMAIDCapability.kNkMAIDCapability_Aperture, preset.ApertureText, preset.ApertureIndex);
 
                     // Velocidade
-                    if (preset.ShutterSpeedIndex >= 0)
-                        _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_ShutterSpeed, preset.ShutterSpeedIndex);
+                    if (!string.IsNullOrEmpty(preset.ShutterSpeedText))
+                        SetEnumByText((uint)eNkMAIDCapability.kNkMAIDCapability_ShutterSpeed, preset.ShutterSpeedText, preset.ShutterSpeedIndex);
 
                     // PictureControl
-                    if (preset.PictureControlIndex >= 0)
+                    if (!string.IsNullOrEmpty(preset.PictureControlText))
+                        SetEnumByText((uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl, preset.PictureControlText, preset.PictureControlIndex);
+                    else if (preset.PictureControlIndex >= 0)
                         _nikonManager.SetEnumCapability((uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl, preset.PictureControlIndex);
 
                     // Temperatura de cor (conforme PicStone)
