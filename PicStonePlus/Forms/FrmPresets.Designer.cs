@@ -41,6 +41,7 @@ namespace PicStonePlus.Forms
             this.lblTemperatura = new System.Windows.Forms.Label();
             this.cboTemperatura = new System.Windows.Forms.ComboBox();
             this.lblTempInfo = new System.Windows.Forms.Label();
+            this.chkAutoFoco = new System.Windows.Forms.CheckBox();
 
             // Campos de pós-produção
             this.lblBrilho = new System.Windows.Forms.Label();
@@ -201,7 +202,7 @@ namespace PicStonePlus.Forms
             this.grpCamera.Location = new System.Drawing.Point(8, 8);
             this.grpCamera.Name = "grpCamera";
             this.grpCamera.Padding = new System.Windows.Forms.Padding(8);
-            this.grpCamera.Size = new System.Drawing.Size(564, 210);
+            this.grpCamera.Size = new System.Drawing.Size(564, 235);
             this.grpCamera.TabIndex = 0;
             this.grpCamera.TabStop = false;
             this.grpCamera.Text = "Configurações de Câmera (por material)";
@@ -218,6 +219,7 @@ namespace PicStonePlus.Forms
             this.grpCamera.Controls.Add(this.lblTemperatura);
             this.grpCamera.Controls.Add(this.cboTemperatura);
             this.grpCamera.Controls.Add(this.lblTempInfo);
+            this.grpCamera.Controls.Add(this.chkAutoFoco);
 
             // Nome
             this.lblNome.Location = new System.Drawing.Point(12, 24);
@@ -295,6 +297,14 @@ namespace PicStonePlus.Forms
             this.lblTempInfo.Size = new System.Drawing.Size(200, 20);
             this.lblTempInfo.Text = "D7200 / D7500";
             this.lblTempInfo.ForeColor = System.Drawing.Color.Gray;
+
+            // Auto Foco
+            this.chkAutoFoco.Location = new System.Drawing.Point(105, 202);
+            this.chkAutoFoco.Name = "chkAutoFoco";
+            this.chkAutoFoco.Size = new System.Drawing.Size(200, 20);
+            this.chkAutoFoco.Text = "Auto Foco";
+            this.chkAutoFoco.Checked = true;
+            this.chkAutoFoco.TabIndex = 12;
 
             // =====================================================
             // grpPosProducao - Pós-Produção
@@ -409,6 +419,7 @@ namespace PicStonePlus.Forms
         private System.Windows.Forms.Label lblTemperatura;
         private System.Windows.Forms.ComboBox cboTemperatura;
         private System.Windows.Forms.Label lblTempInfo;
+        private System.Windows.Forms.CheckBox chkAutoFoco;
 
         // Campos de pós-produção
         private System.Windows.Forms.Label lblBrilho;

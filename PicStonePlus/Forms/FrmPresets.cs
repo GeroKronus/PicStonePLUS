@@ -28,6 +28,10 @@ namespace PicStonePlus.Forms
         public FrmPresets(NikonManager nikonManager, string selectPresetName = null)
         {
             InitializeComponent();
+            string iconPath = System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(Application.ExecutablePath) ?? ".", "PicStone.ico");
+            if (System.IO.File.Exists(iconPath))
+                Icon = new System.Drawing.Icon(iconPath);
             _nikonManager = nikonManager;
             _presets = PresetManager.Load();
 
@@ -93,7 +97,16 @@ namespace PicStonePlus.Forms
             if (string.IsNullOrWhiteSpace(nome))
                 return;
 
-            var preset = new MaterialPreset { Nome = nome };
+            var preset = new MaterialPreset
+            {
+                Nome = nome,
+                ISOText = "100",
+                ApertureText = "7.1",
+                ShutterSpeedText = "1/200",
+                PictureControlText = "Standard 0",
+                Temperatura = 5100,
+                AutoFoco = true
+            };
             _presets.Add(preset);
             PresetManager.Save(_presets);
             RefreshList();
@@ -126,12 +139,13 @@ namespace PicStonePlus.Forms
         {
             txtNome.Text = preset.Nome;
 
-            SafeSelectIndex(cboISO, preset.ISOIndex);
-            SafeSelectIndex(cboAbertura, preset.ApertureIndex);
-            SafeSelectIndex(cboVelocidade, preset.ShutterSpeedIndex);
-            SafeSelectIndex(cboPictureControl, preset.PictureControlIndex);
+            SafeSelectByTextOrIndex(cboISO, preset.ISOText, preset.ISOIndex);
+            SafeSelectByTextOrIndex(cboAbertura, preset.ApertureText, preset.ApertureIndex);
+            SafeSelectByTextOrIndex(cboVelocidade, preset.ShutterSpeedText, preset.ShutterSpeedIndex);
+            SafeSelectByTextOrIndex(cboPictureControl, preset.PictureControlText, preset.PictureControlIndex);
 
             SelectTemperatura(preset.Temperatura);
+            chkAutoFoco.Checked = preset.AutoFoco;
 
             nudBrilho.Value = Clamp(preset.Brilho);
             nudContraste.Value = Clamp(preset.Contraste);
@@ -156,6 +170,7 @@ namespace PicStonePlus.Forms
                 ShutterSpeedIndex = cboVelocidade.SelectedIndex,
                 PictureControlIndex = cboPictureControl.SelectedIndex,
                 Temperatura = GetSelectedTemperatura(),
+                AutoFoco = chkAutoFoco.Checked,
 
                 ISOText = cboISO.SelectedIndex >= 0 ? cboISO.Text : "",
                 ApertureText = cboAbertura.SelectedIndex >= 0 ? cboAbertura.Text : "",
@@ -327,6 +342,22 @@ namespace PicStonePlus.Forms
                 combo.SelectedIndex = index;
             else
                 combo.SelectedIndex = -1;
+        }
+
+        private static void SafeSelectByTextOrIndex(ComboBox combo, string text, int index)
+        {
+            if (!string.IsNullOrEmpty(text) && combo.Items.Count > 0)
+            {
+                for (int i = 0; i < combo.Items.Count; i++)
+                {
+                    if (combo.Items[i].ToString() == text)
+                    {
+                        combo.SelectedIndex = i;
+                        return;
+                    }
+                }
+            }
+            SafeSelectIndex(combo, index);
         }
 
         private decimal Clamp(int value)

@@ -17,6 +17,7 @@ namespace PicStonePlus.Models
         public int ShutterSpeedIndex { get; set; }
         public int PictureControlIndex { get; set; }
         public double Temperatura { get; set; } // 0 = WB Auto, >0 = Kelvin (D7500/D7200: Range)
+        public bool AutoFoco { get; set; } = true; // true = AF, false = MF
 
         // Valores textuais (usados para aplicar presets entre câmeras diferentes)
         public string ISOText { get; set; }

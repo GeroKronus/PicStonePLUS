@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Security;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -30,9 +33,18 @@ namespace PicStonePlus.Forms
         private Bitmap _processedImage;   // imagem com pós-produção aplicada
         private Bitmap _beforeImage;      // imagem como estava ANTES da última mudança de PP
 
+        // Crop
+        private Point _cropStart;
+        private Rectangle _cropRect;
+        private bool _isCropping;
+        private string _lastSavedFileName;
+        private RectangleF _cropMask;      // máscara de crop em ratios (0-1) da imagem
+        private bool _cropMaskActive;      // aplica crop automaticamente a novas fotos
+
         public MainForm()
         {
             InitializeComponent();
+            LoadIcon();
             _nikonManager = new NikonManager();
             _nikonManager.CameraEvent += OnCameraEvent;
             _nikonManager.ImageReady += OnImageReady;
@@ -76,9 +88,7 @@ namespace PicStonePlus.Forms
 
             UpdateUIState(false);
 
-            // Manter PictureBox em proporção 3:2 (formato câmera Nikon)
-            splitMain.Panel1.Resize += (s, ev) => ResizePictureBox();
-            Load += (s, ev) => ResizePictureBox();
+            // PictureBox usa Dock=Fill com SizeMode=Zoom, não precisa de resize manual
 
             // Auto-connect ao abrir
             Load += async (s, ev) => await AutoConnect();
@@ -353,17 +363,6 @@ namespace PicStonePlus.Forms
             chkAF.Enabled = connected;
             menuDesconectar.Enabled = connected;
 
-            cboExposureMode.Enabled = connected;
-            cboShutterSpeed.Enabled = connected;
-            cboAperture.Enabled = connected;
-            cboISO.Enabled = connected;
-            trackExpComp.Enabled = connected;
-            cboMetering.Enabled = connected;
-            cboWBMode.Enabled = connected;
-            cboFocusMode.Enabled = connected;
-            cboAFArea.Enabled = connected;
-            btnAutoFocus.Enabled = connected;
-            cboPictureControl.Enabled = connected;
             cboPreset.Enabled = connected;
 
             if (!connected)
@@ -371,21 +370,7 @@ namespace PicStonePlus.Forms
                 lblCameraName.Text = "Câmera: Não conectada";
                 progressBattery.Value = 0;
                 lblLens.Text = "Lente: --";
-                ClearAllCombos();
             }
-        }
-
-        private void ClearAllCombos()
-        {
-            cboExposureMode.Items.Clear();
-            cboShutterSpeed.Items.Clear();
-            cboAperture.Items.Clear();
-            cboISO.Items.Clear();
-            cboMetering.Items.Clear();
-            cboWBMode.Items.Clear();
-            cboFocusMode.Items.Clear();
-            cboAFArea.Items.Clear();
-            cboPictureControl.Items.Clear();
         }
 
         #endregion
@@ -398,7 +383,6 @@ namespace PicStonePlus.Forms
 
             try
             {
-                // Info da câmera
                 LogUI("  PopulateAllControls: GetCameraName");
                 lblCameraName.Text = "Câmera: " + _nikonManager.GetCameraName();
 
@@ -410,21 +394,6 @@ namespace PicStonePlus.Forms
 
                 LogUI("  PopulateAllControls: GetLensInfo");
                 lblLens.Text = "Lente: " + _nikonManager.GetLensInfo();
-
-                // Cada controle protegido individualmente
-                SafePopulateEnum("ExposureMode", cboExposureMode, (uint)eNkMAIDCapability.kNkMAIDCapability_ExposureMode);
-                SafePopulateEnum("ShutterSpeed", cboShutterSpeed, (uint)eNkMAIDCapability.kNkMAIDCapability_ShutterSpeed);
-                SafePopulateEnum("Aperture", cboAperture, (uint)eNkMAIDCapability.kNkMAIDCapability_Aperture);
-                SafePopulateEnum("Sensitivity", cboISO, (uint)eNkMAIDCapability.kNkMAIDCapability_Sensitivity);
-
-                LogUI("  PopulateAllControls: ExposureComp");
-                try { PopulateExposureComp(); } catch (Exception ex) { LogUI($"    ExposureComp falhou: {ex.Message}"); }
-
-                SafePopulateEnum("MeteringMode", cboMetering, (uint)eNkMAIDCapability.kNkMAIDCapability_MeteringMode);
-                SafePopulateEnum("WBMode", cboWBMode, (uint)eNkMAIDCapability.kNkMAIDCapability_WBMode);
-                SafePopulateEnum("FocusMode", cboFocusMode, (uint)eNkMAIDCapability.kNkMAIDCapability_FocusMode);
-                SafePopulateEnum("FocusAreaMode", cboAFArea, (uint)eNkMAIDCapability.kNkMAIDCapability_FocusAreaMode);
-                SafePopulateEnum("PictureControl", cboPictureControl, (uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl);
 
                 LogUI("  PopulateAllControls: COMPLETO");
             }
@@ -439,50 +408,6 @@ namespace PicStonePlus.Forms
             }
         }
 
-        private void SafePopulateEnum(string name, ComboBox combo, uint capId)
-        {
-            LogUI($"  PopulateAllControls: {name}");
-            try
-            {
-                PopulateEnumCombo(combo, capId);
-            }
-            catch (Exception ex)
-            {
-                LogUI($"    {name} falhou: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
-
-        private void PopulateEnumCombo(ComboBox combo, uint capId)
-        {
-            combo.Items.Clear();
-            List<string> options;
-            int currentIndex;
-
-            if (_nikonManager.GetEnumCapability(capId, out options, out currentIndex))
-            {
-                foreach (string opt in options)
-                    combo.Items.Add(opt);
-
-                if (currentIndex >= 0 && currentIndex < combo.Items.Count)
-                    combo.SelectedIndex = currentIndex;
-            }
-        }
-
-        private void PopulateExposureComp()
-        {
-            double value, lower, upper;
-            uint steps;
-            if (_nikonManager.GetRangeCapability((uint)eNkMAIDCapability.kNkMAIDCapability_ExposureComp,
-                out value, out lower, out upper, out steps))
-            {
-                // Converter para steps do trackbar (multiplicar por 10 para ter resolução de 0.1)
-                trackExpComp.Minimum = (int)(lower * 10);
-                trackExpComp.Maximum = (int)(upper * 10);
-                trackExpComp.Value = Math.Max(trackExpComp.Minimum, Math.Min(trackExpComp.Maximum, (int)(value * 10)));
-                lblExpCompValue.Text = $"{value:+0.0;-0.0;0.0} EV";
-            }
-        }
-
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             PopulateAllControls();
@@ -492,75 +417,6 @@ namespace PicStonePlus.Forms
         #endregion
 
         #region Eventos dos Controles
-
-        private void cboExposureMode_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_ExposureMode, cboExposureMode.SelectedIndex);
-        }
-
-        private void cboShutterSpeed_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_ShutterSpeed, cboShutterSpeed.SelectedIndex);
-        }
-
-        private void cboAperture_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_Aperture, cboAperture.SelectedIndex);
-        }
-
-        private void cboISO_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_Sensitivity, cboISO.SelectedIndex);
-        }
-
-        private void cboMetering_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_MeteringMode, cboMetering.SelectedIndex);
-        }
-
-        private void cboWBMode_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_WBMode, cboWBMode.SelectedIndex);
-        }
-
-        private void cboFocusMode_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_FocusMode, cboFocusMode.SelectedIndex);
-        }
-
-        private void cboAFArea_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_FocusAreaMode, cboAFArea.SelectedIndex);
-        }
-
-        private void cboPictureControl_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            _ = SetEnumAsync((uint)eNkMAIDCapability.kNkMAIDCapability_PictureControl, cboPictureControl.SelectedIndex);
-        }
-
-        private void trackExpComp_Scroll(object sender, EventArgs e)
-        {
-            if (_isUpdatingControls || !_nikonManager.IsConnected) return;
-            double val = trackExpComp.Value / 10.0;
-            lblExpCompValue.Text = $"{val:+0.0;-0.0;0.0} EV";
-            _ = Task.Run(() => _nikonManager.SetRangeCapability(
-                (uint)eNkMAIDCapability.kNkMAIDCapability_ExposureComp, val));
-        }
-
-        private async Task SetEnumAsync(uint capId, int index)
-        {
-            if (index < 0) return;
-            await Task.Run(() => _nikonManager.SetEnumCapability(capId, index));
-        }
 
         private async void chkAF_CheckedChanged(object sender, EventArgs e)
         {
@@ -642,13 +498,13 @@ namespace PicStonePlus.Forms
         {
             if (!_nikonManager.IsConnected) return;
 
-            btnAutoFocus.Enabled = false;
+            menuAutoFocus.Enabled = false;
             SetStatus("Focando...");
 
             bool success = await Task.Run(() => _nikonManager.AutoFocus());
 
             SetStatus(success ? "Foco OK" : "Erro no AutoFocus");
-            btnAutoFocus.Enabled = true;
+            menuAutoFocus.Enabled = true;
         }
 
         #endregion
@@ -722,7 +578,7 @@ namespace PicStonePlus.Forms
                     using (var ms = new MemoryStream(imageData))
                     {
                         var oldImage = picLiveView.Image;
-                        picLiveView.Image = Image.FromStream(ms);
+                        picLiveView.Image = Image.FromStream(ms, useEmbeddedColorManagement: true);
                         oldImage?.Dispose();
                     }
                 }
@@ -851,34 +707,86 @@ namespace PicStonePlus.Forms
 
             try
             {
-                // Salvar imagem original
-                string fileName = $"DSC_{DateTime.Now:yyyyMMdd_HHmmss}{Path.GetExtension(e.FileName)}";
-                string fullPath = Path.Combine(_savePath, fileName);
-                File.WriteAllBytes(fullPath, e.ImageData);
-                SetStatus($"Imagem salva: {fileName}");
-
-                // Mostrar imagem capturada no picturebox principal
-                if (e.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase))
+                // Naming: sequência ativa → "MATERIAL_001.ext", senão → "DSC_timestamp.ext"
+                string ext = Path.GetExtension(e.FileName);
+                string fileName;
+                if (SequenciaAtiva)
                 {
-                    // Guardar original para preview/comparação
+                    string numChapa = IncrementaSequencia();
+                    if (numChapa != null)
+                    {
+                        string materialName = _currentPreset?.Nome ?? "DSC";
+                        fileName = $"{materialName}_{numChapa}{ext}";
+                    }
+                    else
+                    {
+                        fileName = $"DSC_{DateTime.Now:yyyyMMdd_HHmmss}{ext}";
+                    }
+                }
+                else
+                {
+                    fileName = $"DSC_{DateTime.Now:yyyyMMdd_HHmmss}{ext}";
+                }
+                string fullPath = Path.Combine(_savePath, fileName);
+                bool isJpg = e.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase);
+                bool hasPP = isJpg && _currentPreset != null && PostProduction.HasPostProduction(_currentPreset);
+
+                if (isJpg)
+                {
+                    // Carregar original em memória para preview/reprocessamento
                     _originalImage?.Dispose();
                     using (var ms = new MemoryStream(e.ImageData))
-                        _originalImage = new Bitmap(Image.FromStream(ms));
+                    using (var temp = Image.FromStream(ms, useEmbeddedColorManagement: true))
+                        _originalImage = new Bitmap(temp);
+                }
 
-                    // Salvar versão pós-produção em disco se aplicável
-                    if (_currentPreset != null && PostProduction.HasPostProduction(_currentPreset))
+                if (hasPP)
+                {
+                    // Original fica como temporário na pasta da aplicação (só a última, sobrescreve anterior)
+                    string tempPath = Path.Combine(
+                        Path.GetDirectoryName(Application.ExecutablePath) ?? ".", "_temp_original.jpg");
+                    File.WriteAllBytes(tempPath, e.ImageData);
+
+                    // Arquivo principal já sai com pós-produção aplicada
+                    using (Bitmap processed = PostProduction.Apply(_originalImage, _currentPreset))
                     {
-                        using (Bitmap processed = PostProduction.Apply(_originalImage, _currentPreset))
+                        var jpegCodec = ImageCodecInfo.GetImageEncoders()
+                            .FirstOrDefault(c => c.MimeType == "image/jpeg");
+                        if (jpegCodec != null)
                         {
-                            string ppFileName = Path.GetFileNameWithoutExtension(fileName) + "_pp.jpg";
-                            string ppFullPath = Path.Combine(_savePath, ppFileName);
-                            processed.Save(ppFullPath, System.Drawing.Imaging.ImageFormat.Jpeg);
+                            var encParams = new EncoderParameters(1);
+                            encParams.Param[0] = new EncoderParameter(Encoder.Quality, 95L);
+                            processed.Save(fullPath, jpegCodec, encParams);
                         }
-                        SetStatus($"Imagem salva: {fileName} (pós-produção aplicada)");
+                        else
+                        {
+                            processed.Save(fullPath, ImageFormat.Jpeg);
+                        }
                     }
+                    _lastSavedFileName = fileName;
+                    SetStatus($"Imagem salva: {fileName} (p\u00F3s-produ\u00E7\u00E3o aplicada)");
+                }
+                else
+                {
+                    // Sem pós-produção: salvar original como arquivo principal
+                    File.WriteAllBytes(fullPath, e.ImageData);
+                    _lastSavedFileName = fileName;
+                    SetStatus($"Imagem salva: {fileName}");
+                }
 
-                    // Atualizar preview (mostra processada ou original)
+                if (isJpg)
+                {
+                    // Atualizar preview (mostra processada ou original, com crop se ativo)
                     UpdatePostProductionPreview();
+
+                    // Auto-salvar crop se máscara ativa
+                    if (_cropMaskActive)
+                    {
+                        Bitmap cropSource = _processedImage ?? _originalImage;
+                        Rectangle cropRect = GetCropRectFromMask(cropSource);
+                        if (cropRect.Width > 0 && cropRect.Height > 0)
+                            SaveCropFile(cropSource, cropRect);
+                    }
                 }
             }
             catch (Exception ex)
@@ -914,7 +822,17 @@ namespace PicStonePlus.Forms
         private void LoadPresets()
         {
             _presets = PresetManager.Load();
+            _presets.Sort((a, b) => string.Compare(a.Nome, b.Nome, StringComparison.OrdinalIgnoreCase));
             RefreshPresetCombo();
+
+            // Selecionar primeiro preset (ordem alfabética) se existir
+            if (_presets.Count > 0)
+            {
+                _isUpdatingControls = true;
+                cboPreset.SelectedIndex = 1;
+                _isUpdatingControls = false;
+                _currentPreset = _presets[0];
+            }
         }
 
         private void RefreshPresetCombo()
@@ -1016,7 +934,19 @@ namespace PicStonePlus.Forms
                                 preset.Temperatura);
                         }
                     }
+
+                    // Auto Foco / Manual
+                    if (preset.AutoFoco)
+                        _nikonManager.EnableAutoFocus();
+                    else
+                        _nikonManager.EnableManualFocus();
                 });
+
+                // Atualizar checkbox AF na UI
+                _isUpdatingControls = true;
+                chkAF.Checked = preset.AutoFoco;
+                chkAF.Text = preset.AutoFoco ? "AF" : "MF";
+                _isUpdatingControls = false;
 
                 // Atualizar UI com as novas configurações
                 PopulateAllControls();
@@ -1109,6 +1039,10 @@ namespace PicStonePlus.Forms
 
                 lblLiveViewInfo.Text = "Foto capturada  (\u2190 antes | depois \u2192)";
             }
+
+            // Aplicar crop se m\u00E1scara ativa
+            if (_cropMaskActive)
+                ApplyCropToDisplay();
         }
 
         #endregion
@@ -1118,14 +1052,25 @@ namespace PicStonePlus.Forms
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             // Não interceptar setas em controles que precisam delas
-            if (ActiveControl is ComboBox || ActiveControl is TrackBar)
+            if (ActiveControl is ComboBox || ActiveControl is TextBox || ActiveControl is RichTextBox)
                 return base.ProcessCmdKey(ref msg, keyData);
 
             if (keyData == Keys.Left && _beforeImage != null)
             {
                 // Mostrar como estava ANTES da última mudança de PP
                 var oldImage = picLiveView.Image;
-                picLiveView.Image = new Bitmap(_beforeImage);
+                Bitmap display = new Bitmap(_beforeImage);
+                if (_cropMaskActive)
+                {
+                    Rectangle rect = GetCropRectFromMask(_beforeImage);
+                    if (rect.Width > 0 && rect.Height > 0)
+                    {
+                        Bitmap cropped = CropBitmap(_beforeImage, rect);
+                        display.Dispose();
+                        display = cropped;
+                    }
+                }
+                picLiveView.Image = display;
                 oldImage?.Dispose();
                 lblLiveViewInfo.Text = "[\u25C0 ANTES]  (\u2190 antes | depois \u2192)";
                 return true;
@@ -1138,7 +1083,18 @@ namespace PicStonePlus.Forms
                 if (currentImage != null)
                 {
                     var oldImage = picLiveView.Image;
-                    picLiveView.Image = new Bitmap(currentImage);
+                    Bitmap display = new Bitmap(currentImage);
+                    if (_cropMaskActive)
+                    {
+                        Rectangle rect = GetCropRectFromMask(currentImage);
+                        if (rect.Width > 0 && rect.Height > 0)
+                        {
+                            Bitmap cropped = CropBitmap(currentImage, rect);
+                            display.Dispose();
+                            display = cropped;
+                        }
+                    }
+                    picLiveView.Image = display;
                     oldImage?.Dispose();
                     lblLiveViewInfo.Text = "[DEPOIS \u25B6]  (\u2190 antes | depois \u2192)";
                 }
@@ -1150,7 +1106,421 @@ namespace PicStonePlus.Forms
 
         #endregion
 
+        #region Crop
+
+        private void picLiveView_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (_originalImage == null || _isLiveViewActive) return;
+
+            // Botão direito: remover crop e mostrar imagem completa
+            if (e.Button == MouseButtons.Right && _cropMaskActive)
+            {
+                _cropMaskActive = false;
+                ShowFullImage();
+                return;
+            }
+
+            if (e.Button != MouseButtons.Left) return;
+
+            _isCropping = true;
+            _cropStart = e.Location;
+            _cropRect = Rectangle.Empty;
+            picLiveView.Cursor = Cursors.Cross;
+        }
+
+        private void picLiveView_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isCropping) return;
+
+            int x = Math.Min(_cropStart.X, e.X);
+            int y = Math.Min(_cropStart.Y, e.Y);
+            int w = Math.Abs(e.X - _cropStart.X);
+            int h = Math.Abs(e.Y - _cropStart.Y);
+            _cropRect = new Rectangle(x, y, w, h);
+            picLiveView.Invalidate();
+        }
+
+        private void picLiveView_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (!_isCropping) return;
+
+            _isCropping = false;
+            picLiveView.Cursor = Cursors.Default;
+
+            if (_cropRect.Width > 10 && _cropRect.Height > 10)
+                ApplyCrop();
+
+            _cropRect = Rectangle.Empty;
+            picLiveView.Invalidate();
+        }
+
+        private void picLiveView_Paint(object sender, PaintEventArgs e)
+        {
+            if (_cropRect.Width > 0 && _cropRect.Height > 0)
+            {
+                using (var pen = new Pen(Color.Red, 2f) { DashStyle = DashStyle.Dash })
+                    e.Graphics.DrawRectangle(pen, _cropRect);
+            }
+        }
+
+        /// <summary>
+        /// Converte coordenadas do PictureBox (SizeMode=Zoom) para coordenadas da imagem real.
+        /// </summary>
+        private Rectangle TranslateToImageCoords(Rectangle picRect, Image img)
+        {
+            float picW = picLiveView.ClientSize.Width;
+            float picH = picLiveView.ClientSize.Height;
+            float imgW = img.Width;
+            float imgH = img.Height;
+
+            float zoom = Math.Min(picW / imgW, picH / imgH);
+            float dispW = imgW * zoom;
+            float dispH = imgH * zoom;
+            float offX = (picW - dispW) / 2f;
+            float offY = (picH - dispH) / 2f;
+
+            int x = (int)((picRect.X - offX) / zoom);
+            int y = (int)((picRect.Y - offY) / zoom);
+            int w = (int)(picRect.Width / zoom);
+            int h = (int)(picRect.Height / zoom);
+
+            // Clamp nos limites da imagem
+            x = Math.Max(0, Math.Min(x, (int)imgW - 1));
+            y = Math.Max(0, Math.Min(y, (int)imgH - 1));
+            w = Math.Min(w, (int)imgW - x);
+            h = Math.Min(h, (int)imgH - y);
+
+            return new Rectangle(x, y, w, h);
+        }
+
+        /// <summary>
+        /// Converte a máscara de ratios (0-1) para retângulo em pixels da imagem.
+        /// </summary>
+        private Rectangle GetCropRectFromMask(Bitmap img)
+        {
+            int x = (int)(_cropMask.X * img.Width);
+            int y = (int)(_cropMask.Y * img.Height);
+            int w = (int)(_cropMask.Width * img.Width);
+            int h = (int)(_cropMask.Height * img.Height);
+
+            x = Math.Max(0, Math.Min(x, img.Width - 1));
+            y = Math.Max(0, Math.Min(y, img.Height - 1));
+            w = Math.Min(w, img.Width - x);
+            h = Math.Min(h, img.Height - y);
+
+            return new Rectangle(x, y, w, h);
+        }
+
+        private Bitmap CropBitmap(Bitmap source, Rectangle rect)
+        {
+            var cropped = new Bitmap(rect.Width, rect.Height);
+            using (var g = Graphics.FromImage(cropped))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(source,
+                    new Rectangle(0, 0, rect.Width, rect.Height),
+                    rect,
+                    GraphicsUnit.Pixel);
+            }
+            return cropped;
+        }
+
+        /// <summary>
+        /// Aplica o crop desenhado pelo usuário: salva arquivo, armazena máscara e exibe no PictureBox.
+        /// </summary>
+        private void ApplyCrop()
+        {
+            Bitmap source = _processedImage ?? _originalImage;
+            if (source == null) return;
+
+            Rectangle imgRect = TranslateToImageCoords(_cropRect, source);
+            if (imgRect.Width < 1 || imgRect.Height < 1) return;
+
+            // Armazenar máscara como ratios (0-1) para reutilizar em novas fotos
+            _cropMask = new RectangleF(
+                (float)imgRect.X / source.Width,
+                (float)imgRect.Y / source.Height,
+                (float)imgRect.Width / source.Width,
+                (float)imgRect.Height / source.Height);
+            _cropMaskActive = true;
+
+            // Salvar crop em disco
+            SaveCropFile(source, imgRect);
+
+            // Exibir imagem cropada no PictureBox
+            using (var cropped = CropBitmap(source, imgRect))
+            {
+                var old = picLiveView.Image;
+                picLiveView.Image = new Bitmap(cropped);
+                old?.Dispose();
+            }
+
+            lblLiveViewInfo.Text = "Crop ativo - bot\u00E3o direito para voltar";
+        }
+
+        /// <summary>
+        /// Aplica a máscara de crop ao que está exibido no PictureBox.
+        /// </summary>
+        private void ApplyCropToDisplay()
+        {
+            Bitmap source = _processedImage ?? _originalImage;
+            if (source == null) return;
+
+            Rectangle rect = GetCropRectFromMask(source);
+            if (rect.Width < 1 || rect.Height < 1) return;
+
+            using (var cropped = CropBitmap(source, rect))
+            {
+                var old = picLiveView.Image;
+                picLiveView.Image = new Bitmap(cropped);
+                old?.Dispose();
+            }
+
+            lblLiveViewInfo.Text = "Crop ativo - bot\u00E3o direito para voltar";
+        }
+
+        /// <summary>
+        /// Mostra a imagem completa (sem crop) no PictureBox.
+        /// </summary>
+        private void ShowFullImage()
+        {
+            Bitmap source = _processedImage ?? _originalImage;
+            if (source == null) return;
+
+            var old = picLiveView.Image;
+            picLiveView.Image = new Bitmap(source);
+            old?.Dispose();
+
+            lblLiveViewInfo.Text = "Foto capturada  (\u2190 antes | depois \u2192)";
+        }
+
+        /// <summary>
+        /// Salva o crop como JPEG qualidade 95 na pasta CROP.
+        /// </summary>
+        private void SaveCropFile(Bitmap source, Rectangle imgRect)
+        {
+            string cropDir = Path.Combine(_savePath, "CROP");
+            if (!Directory.Exists(cropDir))
+                Directory.CreateDirectory(cropDir);
+
+            string baseName = !string.IsNullOrEmpty(_lastSavedFileName)
+                ? Path.GetFileNameWithoutExtension(_lastSavedFileName)
+                : $"CROP_{DateTime.Now:yyyyMMdd_HHmmss}";
+
+            string cropPath = Path.Combine(cropDir, baseName + "_crop.jpg");
+
+            using (var cropped = CropBitmap(source, imgRect))
+            {
+                var jpegCodec = ImageCodecInfo.GetImageEncoders()
+                    .FirstOrDefault(c => c.MimeType == "image/jpeg");
+                if (jpegCodec != null)
+                {
+                    var encoderParams = new EncoderParameters(1);
+                    encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 95L);
+                    cropped.Save(cropPath, jpegCodec, encoderParams);
+                }
+                else
+                {
+                    cropped.Save(cropPath, ImageFormat.Jpeg);
+                }
+            }
+
+            SetStatus($"Crop salvo: {Path.GetFileName(cropPath)}");
+        }
+
+        #endregion
+
+        #region Sequência de Chapas
+
+        private List<string> _seqNumeros;  // números expandidos ("1","2","3"...)
+        private List<Color> _seqCores;     // verde=pendente, vermelho=feito
+        private int _seqIndice = -1;       // posição atual (-1 = não iniciado)
+
+        private void btnSeqOk_Click(object sender, EventArgs e)
+        {
+            string input = txtSequencia.Text.Trim();
+            if (string.IsNullOrEmpty(input))
+            {
+                // Limpar sequência
+                _seqNumeros = null;
+                _seqCores = null;
+                _seqIndice = -1;
+                rtbSequencia.Clear();
+                lblSeqInfo.Text = "";
+                btnSeqUndo.Enabled = false;
+                return;
+            }
+
+            var numeros = ParseSequencia(input);
+            if (numeros == null || numeros.Count == 0)
+            {
+                MessageBox.Show("Formato inválido.\n\nExemplos:\n  1-20\n  1,3,5-10,15\n  10-5 (reverso)",
+                    "Sequência", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Verificar duplicatas - bloqueia até o usuário corrigir
+            var duplicatas = numeros.GroupBy(n => n).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            if (duplicatas.Count > 0)
+            {
+                MessageBox.Show(
+                    $"Números repetidos: {string.Join(", ", duplicatas)}\n\n" +
+                    "Corrija a sequência antes de continuar.",
+                    "Duplicatas", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtSequencia.Focus();
+                return;
+            }
+
+            _seqNumeros = numeros;
+            _seqCores = new List<Color>();
+            for (int i = 0; i < numeros.Count; i++)
+                _seqCores.Add(Color.Green);
+            _seqIndice = -1;
+
+            AtualizarRichText();
+            btnSeqUndo.Enabled = false;
+        }
+
+        /// <summary>
+        /// Parseia string de sequência suportando ranges (1-20, 10-5) e separadores (,;/)
+        /// </summary>
+        private List<string> ParseSequencia(string input)
+        {
+            var result = new List<string>();
+
+            // Substituir separadores por vírgula
+            string normalized = input.Replace(";", ",").Replace("/", ",");
+            string[] parts = normalized.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string part in parts)
+            {
+                string trimmed = part.Trim();
+                if (string.IsNullOrEmpty(trimmed)) continue;
+
+                // Verificar se é range (contém "-" mas não é número negativo)
+                int dashIndex = trimmed.IndexOf('-', 1); // pular possível sinal negativo
+                if (dashIndex > 0)
+                {
+                    string leftStr = trimmed.Substring(0, dashIndex).Trim();
+                    string rightStr = trimmed.Substring(dashIndex + 1).Trim();
+
+                    int left, right;
+                    if (!int.TryParse(leftStr, out left) || !int.TryParse(rightStr, out right))
+                        return null; // formato inválido
+
+                    if (left <= right)
+                    {
+                        for (int i = left; i <= right; i++)
+                            result.Add(i.ToString());
+                    }
+                    else
+                    {
+                        // Range reverso (ex: 10-5)
+                        for (int i = left; i >= right; i--)
+                            result.Add(i.ToString());
+                    }
+                }
+                else
+                {
+                    int num;
+                    if (!int.TryParse(trimmed, out num))
+                        return null; // formato inválido
+                    result.Add(num.ToString());
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Atualiza o RichTextBox com os números coloridos (verde=pendente, vermelho=feito).
+        /// </summary>
+        private void AtualizarRichText()
+        {
+            if (_seqNumeros == null) return;
+
+            rtbSequencia.Clear();
+            for (int i = 0; i < _seqNumeros.Count; i++)
+            {
+                if (i > 0)
+                    rtbSequencia.AppendText("  ");
+
+                rtbSequencia.SelectionStart = rtbSequencia.TextLength;
+                rtbSequencia.SelectionLength = 0;
+                rtbSequencia.SelectionColor = _seqCores[i];
+                rtbSequencia.SelectionFont = new Font("Consolas", 9.75f,
+                    _seqCores[i] == Color.Red ? FontStyle.Bold : FontStyle.Regular);
+                rtbSequencia.AppendText(_seqNumeros[i].PadLeft(3, '0'));
+            }
+
+            int total = _seqNumeros.Count;
+            int restantes = _seqCores.Count(c => c == Color.Green);
+            lblSeqInfo.Text = $"Total: {total} | Restantes: {restantes}";
+        }
+
+        /// <summary>
+        /// Avança para o próximo número da sequência. Retorna o número formatado (3 dígitos) ou null se acabou.
+        /// </summary>
+        private string IncrementaSequencia()
+        {
+            if (_seqNumeros == null) return null;
+
+            _seqIndice++;
+            if (_seqIndice >= _seqNumeros.Count)
+            {
+                _seqIndice = _seqNumeros.Count; // manter no fim
+                MessageBox.Show("Todas as chapas foram fotografadas!",
+                    "Sequência Completa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return null;
+            }
+
+            // Marcar vermelho
+            _seqCores[_seqIndice] = Color.Red;
+            AtualizarRichText();
+            btnSeqUndo.Enabled = true;
+
+            // Retornar número formatado com 3 dígitos
+            int num;
+            if (int.TryParse(_seqNumeros[_seqIndice], out num))
+                return num.ToString("D3");
+            return _seqNumeros[_seqIndice].PadLeft(3, '0');
+        }
+
+        private void btnSeqUndo_Click(object sender, EventArgs e)
+        {
+            if (_seqNumeros == null || _seqIndice < 0) return;
+
+            if (_seqIndice < _seqNumeros.Count)
+            {
+                // Voltar último vermelho → verde
+                _seqCores[_seqIndice] = Color.Green;
+            }
+            _seqIndice--;
+            AtualizarRichText();
+
+            btnSeqUndo.Enabled = (_seqIndice >= 0);
+            SetStatus("Última chapa desfeita");
+        }
+
+        /// <summary>
+        /// Verifica se a sequência está ativa e ainda tem chapas pendentes.
+        /// </summary>
+        private bool SequenciaAtiva
+        {
+            get { return _seqNumeros != null && (_seqIndice + 1) < _seqNumeros.Count; }
+        }
+
+        #endregion
+
         #region Helpers
+
+        private void LoadIcon()
+        {
+            string iconPath = Path.Combine(
+                Path.GetDirectoryName(Application.ExecutablePath) ?? ".", "PicStone.ico");
+            if (File.Exists(iconPath))
+                Icon = new System.Drawing.Icon(iconPath);
+        }
 
         private void SetStatus(string text)
         {
@@ -1176,38 +1546,6 @@ namespace PicStonePlus.Forms
             catch { }
         }
 
-        private void ResizePictureBox()
-        {
-            var panel = splitMain.Panel1;
-            int panelW = panel.ClientSize.Width;
-            int panelH = panel.ClientSize.Height;
-
-            if (panelW <= 0 || panelH <= 0) return;
-
-            // Proporção 3:2 (formato Nikon)
-            const double aspectRatio = 3.0 / 2.0;
-
-            int picW, picH;
-            if ((double)panelW / panelH > aspectRatio)
-            {
-                // Panel mais largo que 3:2 → limitar pela altura
-                picH = panelH;
-                picW = (int)(panelH * aspectRatio);
-            }
-            else
-            {
-                // Panel mais alto que 3:2 → limitar pela largura
-                picW = panelW;
-                picH = (int)(panelW / aspectRatio);
-            }
-
-            // Centralizar no panel
-            int x = (panelW - picW) / 2;
-            int y = (panelH - picH) / 2;
-
-            picLiveView.Location = new Point(x, y);
-            picLiveView.Size = new Size(picW, picH);
-        }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {

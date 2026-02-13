@@ -1443,9 +1443,11 @@ namespace PicStonePlus.SDK
                             int offset = 0;
                             for (uint i = 0; i < stEnum.ulElements; i++)
                             {
+                                if (offset >= dataSize) break;
                                 string s = Marshal.PtrToStringAnsi(IntPtr.Add(stEnum.pData, offset));
-                                options.Add(s ?? $"#{i}");
-                                offset += (s?.Length ?? 0) + 1;
+                                if (string.IsNullOrEmpty(s)) break;
+                                options.Add(s);
+                                offset += s.Length + 1;
                             }
                         }
                         else
