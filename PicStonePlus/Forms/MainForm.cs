@@ -41,6 +41,11 @@ namespace PicStonePlus.Forms
         private RectangleF _cropMask;      // máscara de crop em ratios (0-1) da imagem
         private bool _cropMaskActive;      // aplica crop automaticamente a novas fotos
 
+        // Navegação de imagens salvas
+        private string[] _browseFiles;
+        private int _browseIndex = -1;
+        private bool _browsing;
+
         public MainForm()
         {
             InitializeComponent();
@@ -51,9 +56,9 @@ namespace PicStonePlus.Forms
             _nikonManager.Progress += OnProgress;
             _nikonManager.CameraDisconnected += OnCameraDisconnected;
 
-            _savePath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
-                "NikonD7500");
+            // Pasta base vem das configurações
+            var appSettings = AppSettingsManager.Load();
+            _savePath = appSettings.PastaBase;
 
             if (!Directory.Exists(_savePath))
                 Directory.CreateDirectory(_savePath);
@@ -95,6 +100,9 @@ namespace PicStonePlus.Forms
 
             // Carregar presets de material
             LoadPresets();
+
+            // Carregar estágios cadastrados
+            LoadEstagios();
         }
 
         #region Conexão
@@ -393,7 +401,11 @@ namespace PicStonePlus.Forms
                 lblBattery.Text = $"Bateria: {battery}%";
 
                 LogUI("  PopulateAllControls: GetLensInfo");
-                lblLens.Text = "Lente: " + _nikonManager.GetLensInfo();
+                string lensInfo = _nikonManager.GetLensInfo();
+                double focal = _nikonManager.GetFocalLength();
+                lblLens.Text = focal > 0
+                    ? $"Lente: {lensInfo}  {focal:0} mm"
+                    : "Lente: " + lensInfo;
 
                 LogUI("  PopulateAllControls: COMPLETO");
             }
@@ -451,6 +463,14 @@ namespace PicStonePlus.Forms
         {
             if (!_nikonManager.IsConnected) return;
 
+            // Exigir número de chapa disponível
+            if (!SequenciaAtiva)
+            {
+                MessageBox.Show("Não há número de chapa disponível.\nCarregue uma sequência antes de fotografar.",
+                    "Chapa Obrigatória", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             btnCapture.Enabled = false;
             _captureInProgress = true;
 
@@ -466,6 +486,7 @@ namespace PicStonePlus.Forms
             }
 
             SetStatus("Capturando...");
+            MostrarAguarde("Aguarde o processamento da imagem...");
 
             var result = await Task.Run(() => _nikonManager.Capture());
 
@@ -533,6 +554,7 @@ namespace PicStonePlus.Forms
 
             if (success)
             {
+                _browsing = false;
                 _isLiveViewActive = true;
                 timerLiveView.Start();
                 btnLiveView.Text = "Live View OFF";
@@ -705,18 +727,24 @@ namespace PicStonePlus.Forms
                 return;
             }
 
+            _browsing = false;
+
             try
             {
-                // Naming: sequência ativa → "MATERIAL_001.ext", senão → "DSC_timestamp.ext"
                 string ext = Path.GetExtension(e.FileName);
                 string fileName;
+                string targetDir;
+                string numChapa = null;
+
+                // Sempre usar subpastas do template (mesmo sem sequência)
+                targetDir = MontarCaminhoPasta();
+
                 if (SequenciaAtiva)
                 {
-                    string numChapa = IncrementaSequencia();
+                    numChapa = IncrementaSequencia();
                     if (numChapa != null)
                     {
-                        string materialName = _currentPreset?.Nome ?? "DSC";
-                        fileName = $"{materialName}_{numChapa}{ext}";
+                        fileName = MontarNomeArquivo(numChapa, ext);
                     }
                     else
                     {
@@ -727,17 +755,25 @@ namespace PicStonePlus.Forms
                 {
                     fileName = $"DSC_{DateTime.Now:yyyyMMdd_HHmmss}{ext}";
                 }
-                string fullPath = Path.Combine(_savePath, fileName);
+                string fullPath = Path.Combine(targetDir, fileName);
                 bool isJpg = e.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase);
                 bool hasPP = isJpg && _currentPreset != null && PostProduction.HasPostProduction(_currentPreset);
 
                 if (isJpg)
                 {
                     // Carregar original em memória para preview/reprocessamento
+                    // Usa Graphics.DrawImage para aplicar perfil de cor (não new Bitmap(img) que copia pixels brutos)
                     _originalImage?.Dispose();
                     using (var ms = new MemoryStream(e.ImageData))
                     using (var temp = Image.FromStream(ms, useEmbeddedColorManagement: true))
-                        _originalImage = new Bitmap(temp);
+                    {
+                        _originalImage = new Bitmap(temp.Width, temp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                        _originalImage.SetResolution(temp.HorizontalResolution, temp.VerticalResolution);
+                        using (var g = Graphics.FromImage(_originalImage))
+                        {
+                            g.DrawImage(temp, 0, 0, temp.Width, temp.Height);
+                        }
+                    }
                 }
 
                 if (hasPP)
@@ -772,6 +808,24 @@ namespace PicStonePlus.Forms
                     File.WriteAllBytes(fullPath, e.ImageData);
                     _lastSavedFileName = fileName;
                     SetStatus($"Imagem salva: {fileName}");
+                }
+
+                // Salvar em caminhos extras (com redução de dimensão)
+                if (isJpg)
+                {
+                    // Sem sequência ativa: usar timestamp como nome
+                    string chapaExtra = numChapa ?? DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    if (hasPP)
+                    {
+                        using (Bitmap imagemParaExtras = PostProduction.Apply(_originalImage, _currentPreset))
+                        {
+                            SalvarCaminhosExtras(imagemParaExtras, chapaExtra, ext);
+                        }
+                    }
+                    else
+                    {
+                        SalvarCaminhosExtras(_originalImage, chapaExtra, ext);
+                    }
                 }
 
                 if (isJpg)
@@ -849,6 +903,7 @@ namespace PicStonePlus.Forms
         private void cboPreset_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_isUpdatingControls) return;
+            _cropMaskActive = false;
 
             int idx = cboPreset.SelectedIndex;
             if (idx <= 0)
@@ -1047,14 +1102,77 @@ namespace PicStonePlus.Forms
 
         #endregion
 
-        #region Comparação Antes/Depois
+        #region Comparação Antes/Depois e Navegação de Imagens
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            // --- Abrir pasta no Explorer (Ctrl+E) ---
+            if (keyData == (Keys.Control | Keys.E))
+            {
+                string pasta = MontarCaminhoPasta();
+                if (_cropMaskActive)
+                {
+                    string cropDir = Path.Combine(pasta, "CROP");
+                    if (Directory.Exists(cropDir) && Directory.GetFiles(cropDir, "*.jpg").Length > 0)
+                        pasta = cropDir;
+                }
+                if (Directory.Exists(pasta))
+                    System.Diagnostics.Process.Start("explorer.exe", pasta);
+                return true;
+            }
+
+            // --- Navegação de imagens salvas (Ctrl+Right/Ctrl+Left/Esc) - captura ANTES do filtro de controles ---
+            if (keyData == (Keys.Control | Keys.Right))
+            {
+                if (!_browsing)
+                {
+                    LoadBrowseList();
+                    if (_browseFiles == null || _browseFiles.Length == 0) return true;
+                    _browsing = true;
+                    _browseIndex = _browseFiles.Length - 1; // mais recente
+                }
+                else if (_browseFiles != null && _browseIndex < _browseFiles.Length - 1)
+                {
+                    _browseIndex++;
+                }
+                ShowBrowseImage(_browseIndex);
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.Left))
+            {
+                if (!_browsing)
+                {
+                    LoadBrowseList();
+                    if (_browseFiles == null || _browseFiles.Length == 0) return true;
+                    _browsing = true;
+                    _browseIndex = _browseFiles.Length - 1; // mais recente
+                }
+                else if (_browseIndex > 0)
+                {
+                    _browseIndex--;
+                }
+                ShowBrowseImage(_browseIndex);
+                return true;
+            }
+
+            if (keyData == Keys.Escape && _browsing)
+            {
+                _browsing = false;
+                _browseFiles = null;
+                _browseIndex = -1;
+                if (_originalImage != null)
+                    UpdatePostProductionPreview();
+                else
+                    lblLiveViewInfo.Text = "";
+                return true;
+            }
+
             // Não interceptar setas em controles que precisam delas
             if (ActiveControl is ComboBox || ActiveControl is TextBox || ActiveControl is RichTextBox)
                 return base.ProcessCmdKey(ref msg, keyData);
 
+            // --- Comparação antes/depois (Left/Right) ---
             if (keyData == Keys.Left && _beforeImage != null)
             {
                 // Mostrar como estava ANTES da última mudança de PP
@@ -1102,6 +1220,83 @@ namespace PicStonePlus.Forms
             }
 
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void LoadBrowseList()
+        {
+            try
+            {
+                string pasta = MontarCaminhoPasta();
+
+                // Se crop ativo e existe pasta CROP, priorizar os cropados
+                if (_cropMaskActive)
+                {
+                    string cropDir = Path.Combine(pasta, "CROP");
+                    var cropFiles = Directory.Exists(cropDir)
+                        ? Directory.GetFiles(cropDir, "*.jpg", SearchOption.TopDirectoryOnly)
+                        : new string[0];
+                    if (cropFiles.Length > 0)
+                        pasta = cropDir;
+                }
+
+                if (Directory.Exists(pasta))
+                    _browseFiles = Directory.GetFiles(pasta, "*.jpg", SearchOption.TopDirectoryOnly)
+                                            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                                            .ToArray();
+                else
+                    _browseFiles = Array.Empty<string>();
+            }
+            catch
+            {
+                _browseFiles = Array.Empty<string>();
+            }
+        }
+
+        private void ShowBrowseImage(int index)
+        {
+            if (_browseFiles == null || index < 0 || index >= _browseFiles.Length)
+                return;
+
+            try
+            {
+                string file = _browseFiles[index];
+
+                // Carregar imagem sem manter lock no arquivo (mesmo padrão de OnImageReady)
+                using (var temp = Image.FromFile(file, true))
+                {
+                    Bitmap bmp = new Bitmap(temp.Width, temp.Height, PixelFormat.Format24bppRgb);
+                    using (var g = Graphics.FromImage(bmp))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(temp, 0, 0, temp.Width, temp.Height);
+
+                        // Legenda com número da chapa no canto superior esquerdo
+                        string chapa = Path.GetFileNameWithoutExtension(file);
+                        float fontSize = Math.Max(48f, bmp.Height / 20f);
+                        using (var font = new Font("Arial", fontSize, FontStyle.Bold))
+                        using (var bgBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                        using (var fgBrush = new SolidBrush(Color.White))
+                        {
+                            var size = g.MeasureString(chapa, font);
+                            g.FillRectangle(bgBrush, 10, 10, size.Width + 20, size.Height + 10);
+                            g.DrawString(chapa, font, fgBrush, 20, 15);
+                        }
+                    }
+
+                    var oldImage = picLiveView.Image;
+                    picLiveView.Image = bmp;
+                    oldImage?.Dispose();
+                }
+
+                string nome = Path.GetFileName(file);
+                int num = index + 1;
+                int total = _browseFiles.Length;
+                lblLiveViewInfo.Text = $"[{num}/{total}]  {nome}  (Ctrl+\u2190/\u2192 navegar | Esc sair)";
+            }
+            catch (Exception ex)
+            {
+                lblLiveViewInfo.Text = $"Erro ao carregar imagem: {ex.Message}";
+            }
         }
 
         #endregion
@@ -1299,15 +1494,15 @@ namespace PicStonePlus.Forms
         /// </summary>
         private void SaveCropFile(Bitmap source, Rectangle imgRect)
         {
-            string cropDir = Path.Combine(_savePath, "CROP");
+            string cropDir = Path.Combine(MontarCaminhoPasta(), "CROP");
             if (!Directory.Exists(cropDir))
                 Directory.CreateDirectory(cropDir);
 
-            string baseName = !string.IsNullOrEmpty(_lastSavedFileName)
-                ? Path.GetFileNameWithoutExtension(_lastSavedFileName)
-                : $"CROP_{DateTime.Now:yyyyMMdd_HHmmss}";
+            string fileName = !string.IsNullOrEmpty(_lastSavedFileName)
+                ? _lastSavedFileName
+                : $"CROP_{DateTime.Now:yyyyMMdd_HHmmss}.jpg";
 
-            string cropPath = Path.Combine(cropDir, baseName + "_crop.jpg");
+            string cropPath = Path.Combine(cropDir, fileName);
 
             using (var cropped = CropBitmap(source, imgRect))
             {
@@ -1450,7 +1645,8 @@ namespace PicStonePlus.Forms
                 rtbSequencia.SelectionColor = _seqCores[i];
                 rtbSequencia.SelectionFont = new Font("Consolas", 9.75f,
                     _seqCores[i] == Color.Red ? FontStyle.Bold : FontStyle.Regular);
-                rtbSequencia.AppendText(_seqNumeros[i].PadLeft(3, '0'));
+                int digChapa = AppSettingsManager.Load().DigitoChapa;
+                rtbSequencia.AppendText(_seqNumeros[i].PadLeft(digChapa, '0'));
             }
 
             int total = _seqNumeros.Count;
@@ -1469,8 +1665,6 @@ namespace PicStonePlus.Forms
             if (_seqIndice >= _seqNumeros.Count)
             {
                 _seqIndice = _seqNumeros.Count; // manter no fim
-                MessageBox.Show("Todas as chapas foram fotografadas!",
-                    "Sequência Completa", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return null;
             }
 
@@ -1479,11 +1673,23 @@ namespace PicStonePlus.Forms
             AtualizarRichText();
             btnSeqUndo.Enabled = true;
 
-            // Retornar número formatado com 3 dígitos
+            // Retornar número formatado com N dígitos (configurável)
+            int digitos = AppSettingsManager.Load().DigitoChapa;
+            string resultado;
             int num;
             if (int.TryParse(_seqNumeros[_seqIndice], out num))
-                return num.ToString("D3");
-            return _seqNumeros[_seqIndice].PadLeft(3, '0');
+                resultado = num.ToString("D" + digitos);
+            else
+                resultado = _seqNumeros[_seqIndice].PadLeft(digitos, '0');
+
+            // Avisar se esta foi a última chapa
+            if (_seqIndice + 1 >= _seqNumeros.Count)
+            {
+                MessageBox.Show($"Última chapa fotografada: {resultado}\nA sequência foi concluída.",
+                    "Última Chapa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            return resultado;
         }
 
         private void btnSeqUndo_Click(object sender, EventArgs e)
@@ -1512,7 +1718,332 @@ namespace PicStonePlus.Forms
 
         #endregion
 
+        #region Configurações
+
+        private void menuConfiguracoes_Click(object sender, EventArgs e)
+        {
+            using (var frm = new FrmConfig())
+            {
+                if (frm.ShowDialog(this) == DialogResult.OK)
+                {
+                    // Recarregar configurações (cache invalidado pelo Save)
+                    var settings = AppSettingsManager.Load();
+                    _savePath = settings.PastaBase;
+                    if (!Directory.Exists(_savePath))
+                        Directory.CreateDirectory(_savePath);
+                    LoadEstagios();
+                    SetStatus("Configurações salvas");
+                }
+            }
+        }
+
+        private void LoadEstagios()
+        {
+            var settings = AppSettingsManager.Load();
+            string atual = cboEstagio.Text;
+            cboEstagio.Items.Clear();
+            foreach (var est in settings.Estagios)
+                cboEstagio.Items.Add(est);
+            // Restaurar seleção anterior se ainda existe
+            if (!string.IsNullOrEmpty(atual))
+                cboEstagio.Text = atual;
+            if (cboEstagio.SelectedIndex < 0 && cboEstagio.Items.Count > 0)
+                cboEstagio.SelectedIndex = 0;
+        }
+
+        private void btnPasta_Click(object sender, EventArgs e)
+        {
+            string pasta = MontarCaminhoPasta();
+            if (_cropMaskActive)
+            {
+                string cropDir = Path.Combine(pasta, "CROP");
+                if (Directory.Exists(cropDir) && Directory.GetFiles(cropDir, "*.jpg").Length > 0)
+                    pasta = cropDir;
+            }
+            if (Directory.Exists(pasta))
+                System.Diagnostics.Process.Start("explorer.exe", pasta);
+        }
+
+        private void cboEspessura_SelectedIndexChanged(object sender, EventArgs e)
+        {
+        }
+
+        private void cboEstagio_SelectedIndexChanged(object sender, EventArgs e)
+        {
+        }
+
+        private void txtBloco_Leave(object sender, EventArgs e)
+        {
+            _cropMaskActive = false;
+            string texto = txtBloco.Text.Trim();
+            if (string.IsNullOrEmpty(texto)) return;
+
+            var settings = AppSettingsManager.Load();
+            if (settings.DigitoBloco > 0)
+            {
+                int num;
+                if (int.TryParse(texto, out num))
+                    txtBloco.Text = num.ToString("D" + settings.DigitoBloco);
+                else
+                    txtBloco.Text = texto.PadLeft(settings.DigitoBloco, '0');
+            }
+        }
+
+        private string MontarNomeArquivo(string numChapa, string ext)
+        {
+            var settings = AppSettingsManager.Load();
+            string template = settings.TemplateNomeArquivo;
+
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                string materialName = _currentPreset?.Nome ?? "DSC";
+                return $"{materialName}_{numChapa}{ext}";
+            }
+
+            string nome = ResolverTemplateNome(template, numChapa);
+
+            // Limpar espaços duplos e separadores soltos (tokens vazios)
+            while (nome.Contains("  "))
+                nome = nome.Replace("  ", " ");
+            nome = nome.Trim();
+
+            return nome + ext;
+        }
+
+        private string ResolverTemplateNome(string template, string numChapa)
+        {
+            var settings = AppSettingsManager.Load();
+            string bloco = txtBloco.Text ?? "";
+            if (settings.DigitoBloco > 0 && bloco.Length > 0)
+            {
+                int num;
+                if (int.TryParse(bloco, out num))
+                    bloco = num.ToString("D" + settings.DigitoBloco);
+                else
+                    bloco = bloco.PadLeft(settings.DigitoBloco, '0');
+            }
+
+            string r = template;
+            r = r.Replace("{Material}", _currentPreset?.Nome ?? "");
+            r = r.Replace("{Espessura}", cboEspessura.Text ?? "");
+            r = r.Replace("{Bloco}", bloco);
+            r = r.Replace("{Bundle}", txtBundle.Text ?? "");
+            r = r.Replace("{Estagio}", cboEstagio.Text ?? "");
+            r = r.Replace("{Chapa}", numChapa);
+            r = r.Replace("{Data}", DateTime.Now.ToString("yyyyMMdd"));
+            r = r.Replace("{Hora}", DateTime.Now.ToString("HHmmss"));
+            return r;
+        }
+
+        private string MontarCaminhoPasta()
+        {
+            var settings = AppSettingsManager.Load();
+            string template = settings.TemplateSubpastas;
+
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                if (!Directory.Exists(settings.PastaBase))
+                    Directory.CreateDirectory(settings.PastaBase);
+                return settings.PastaBase;
+            }
+
+            string resolved = ResolverTemplatePasta(template);
+
+            // Cada segmento separado por \ vira um nível de pasta
+            string caminho = settings.PastaBase;
+            string[] segments = resolved.Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string seg in segments)
+            {
+                string clean = seg.Trim();
+                if (!string.IsNullOrEmpty(clean))
+                    caminho = Path.Combine(caminho, clean);
+            }
+
+            if (!Directory.Exists(caminho))
+                Directory.CreateDirectory(caminho);
+
+            return caminho;
+        }
+
+        private string ResolverTemplatePasta(string template)
+        {
+            var settings = AppSettingsManager.Load();
+            string bloco = txtBloco.Text ?? "";
+            if (settings.DigitoBloco > 0 && bloco.Length > 0)
+            {
+                int num;
+                if (int.TryParse(bloco, out num))
+                    bloco = num.ToString("D" + settings.DigitoBloco);
+                else
+                    bloco = bloco.PadLeft(settings.DigitoBloco, '0');
+            }
+
+            string r = template;
+            r = r.Replace("{Ano}", DateTime.Now.ToString("yyyy"));
+            r = r.Replace("{Mes}", DateTime.Now.ToString("MM - MMMM").ToUpper());
+            r = r.Replace("{Material}", _currentPreset?.Nome ?? "SEM_MATERIAL");
+            r = r.Replace("{Bloco}", bloco);
+            r = r.Replace("{Espessura}", cboEspessura.Text ?? "");
+            r = r.Replace("{Estagio}", cboEstagio.Text ?? "");
+            return r;
+        }
+
+        private void SalvarCaminhosExtras(Bitmap imagemFinal, string numChapa, string ext)
+        {
+            var settings = AppSettingsManager.Load();
+            if (settings.CaminhosExtras == null) return;
+
+            for (int i = 0; i < settings.CaminhosExtras.Count; i++)
+            {
+                var extra = settings.CaminhosExtras[i];
+                if (!extra.Ativo || string.IsNullOrEmpty(extra.PastaBase)) continue;
+
+                try
+                {
+                    // Montar nome usando template do caminho extra
+                    string nomeExtra = ResolverTemplateNome(extra.TemplateNomeArquivo, numChapa);
+                    while (nomeExtra.Contains("  ")) nomeExtra = nomeExtra.Replace("  ", " ");
+                    nomeExtra = nomeExtra.Trim() + ext;
+
+                    // Montar pasta usando template do caminho extra
+                    string pastaExtra = extra.PastaBase;
+                    if (!string.IsNullOrWhiteSpace(extra.TemplateSubpastas))
+                    {
+                        string resolved = ResolverTemplatePasta(extra.TemplateSubpastas);
+                        string[] segments = resolved.Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (string seg in segments)
+                        {
+                            string clean = seg.Trim();
+                            if (!string.IsNullOrEmpty(clean))
+                                pastaExtra = Path.Combine(pastaExtra, clean);
+                        }
+                    }
+                    if (!Directory.Exists(pastaExtra))
+                        Directory.CreateDirectory(pastaExtra);
+
+                    string fullPathExtra = Path.Combine(pastaExtra, nomeExtra);
+
+                    // Determinar imagem fonte: cropada se máscara ativa, senão original
+                    Bitmap fonteExtra = imagemFinal;
+                    Bitmap croppedExtra = null;
+                    if (_cropMaskActive)
+                    {
+                        Rectangle cropRect = GetCropRectFromMask(imagemFinal);
+                        if (cropRect.Width > 0 && cropRect.Height > 0)
+                        {
+                            croppedExtra = CropBitmap(imagemFinal, cropRect);
+                            fonteExtra = croppedExtra;
+                        }
+                    }
+
+                    try
+                    {
+                        int newW = (int)(fonteExtra.Width * extra.Reducao / 100.0);
+                        int newH = (int)(fonteExtra.Height * extra.Reducao / 100.0);
+                        if (newW < 1) newW = 1;
+                        if (newH < 1) newH = 1;
+
+                        // Salvar redimensionada na pasta normal
+                        using (var resized = new Bitmap(newW, newH))
+                        {
+                            using (var g = Graphics.FromImage(resized))
+                            {
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g.CompositingQuality = CompositingQuality.HighQuality;
+                                g.SmoothingMode = SmoothingMode.HighQuality;
+                                g.DrawImage(fonteExtra, 0, 0, newW, newH);
+                            }
+
+                            var jpegCodec = ImageCodecInfo.GetImageEncoders()
+                                .FirstOrDefault(c => c.MimeType == "image/jpeg");
+                            if (jpegCodec != null)
+                            {
+                                var encParams = new EncoderParameters(1);
+                                encParams.Param[0] = new EncoderParameter(Encoder.Quality, 95L);
+                                resized.Save(fullPathExtra, jpegCodec, encParams);
+                            }
+                            else
+                            {
+                                resized.Save(fullPathExtra, ImageFormat.Jpeg);
+                            }
+                        }
+
+                        // Salvar crop na subpasta CROP do caminho extra
+                        if (_cropMaskActive && croppedExtra != null)
+                        {
+                            string cropDirExtra = Path.Combine(pastaExtra, "CROP");
+                            if (!Directory.Exists(cropDirExtra))
+                                Directory.CreateDirectory(cropDirExtra);
+
+                            string cropPathExtra = Path.Combine(cropDirExtra, nomeExtra);
+
+                            using (var resizedCrop = new Bitmap(newW, newH))
+                            {
+                                using (var g = Graphics.FromImage(resizedCrop))
+                                {
+                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                    g.CompositingQuality = CompositingQuality.HighQuality;
+                                    g.SmoothingMode = SmoothingMode.HighQuality;
+                                    g.DrawImage(croppedExtra, 0, 0, newW, newH);
+                                }
+
+                                var jpegCodec2 = ImageCodecInfo.GetImageEncoders()
+                                    .FirstOrDefault(c => c.MimeType == "image/jpeg");
+                                if (jpegCodec2 != null)
+                                {
+                                    var encParams2 = new EncoderParameters(1);
+                                    encParams2.Param[0] = new EncoderParameter(Encoder.Quality, 95L);
+                                    resizedCrop.Save(cropPathExtra, jpegCodec2, encParams2);
+                                }
+                                else
+                                {
+                                    resizedCrop.Save(cropPathExtra, ImageFormat.Jpeg);
+                                }
+                            }
+                        }
+
+                        LogUI($"Caminho extra {i + 1}: {fullPathExtra} ({newW}x{newH})");
+                    }
+                    finally
+                    {
+                        croppedExtra?.Dispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogUI($"Erro ao salvar caminho extra {i + 1}: {ex.Message}");
+                }
+            }
+        }
+
+        #endregion
+
         #region Helpers
+
+        /// <summary>
+        /// Desenha mensagem de aguarde diretamente no PictureBox (estilo PicStone).
+        /// Texto branco com sombra preta, fonte grande, centralizado.
+        /// </summary>
+        private void MostrarAguarde(string mensagem)
+        {
+            using (var g = picLiveView.CreateGraphics())
+            {
+                float fontSize = Math.Max(14f, picLiveView.Height / 25f);
+                using (var font = new Font("Arial", fontSize, FontStyle.Bold))
+                {
+                    var size = g.MeasureString(mensagem, font);
+                    float x = (picLiveView.Width - size.Width) / 2;
+                    float y = (picLiveView.Height - size.Height) / 2;
+
+                    // Sombra (3 camadas pretas deslocadas)
+                    g.DrawString(mensagem, font, Brushes.Black, x + 3, y + 3);
+                    g.DrawString(mensagem, font, Brushes.Black, x + 2, y + 2);
+                    g.DrawString(mensagem, font, Brushes.Black, x + 1, y + 1);
+                    // Texto branco por cima
+                    g.DrawString(mensagem, font, Brushes.White, x, y);
+                }
+            }
+        }
 
         private void LoadIcon()
         {

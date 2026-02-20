@@ -93,6 +93,12 @@ namespace PicStonePlus.Forms
 
         private void btnNovo_Click(object sender, EventArgs e)
         {
+            // Se há preset selecionado, salvar automaticamente antes de criar novo
+            if (lstPresets.SelectedIndex >= 0 && !string.IsNullOrWhiteSpace(txtNome.Text))
+            {
+                SalvarPresetAtual();
+            }
+
             string nome = PromptNome("Novo Preset", "Nome do material:");
             if (string.IsNullOrWhiteSpace(nome))
                 return;
@@ -190,6 +196,24 @@ namespace PicStonePlus.Forms
             };
         }
 
+        /// <summary>
+        /// Salva o preset atualmente selecionado com os valores dos campos.
+        /// Retorna true se salvou com sucesso.
+        /// </summary>
+        private bool SalvarPresetAtual()
+        {
+            if (lstPresets.SelectedIndex < 0) return false;
+
+            if (string.IsNullOrWhiteSpace(txtNome.Text))
+                return false;
+
+            var preset = ReadFieldsToPreset();
+            _presets[lstPresets.SelectedIndex] = preset;
+            PresetManager.Save(_presets);
+            LastSavedPresetName = preset.Nome;
+            return true;
+        }
+
         private void btnSalvar_Click(object sender, EventArgs e)
         {
             if (lstPresets.SelectedIndex < 0) return;
@@ -201,10 +225,7 @@ namespace PicStonePlus.Forms
                 return;
             }
 
-            var preset = ReadFieldsToPreset();
-            _presets[lstPresets.SelectedIndex] = preset;
-            PresetManager.Save(_presets);
-            LastSavedPresetName = preset.Nome;
+            SalvarPresetAtual();
 
             // Fechar e voltar ao MainForm (que aplica automaticamente)
             Close();

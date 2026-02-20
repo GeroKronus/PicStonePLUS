@@ -1280,6 +1280,21 @@ namespace PicStonePlus.SDK
             }
         }
 
+        public double GetFocalLength()
+        {
+            lock (_sdkLock)
+            {
+                if (!_isSourceOpen) return 0;
+                IntPtr pDouble = Marshal.AllocHGlobal(sizeof(double));
+                Marshal.WriteInt64(pDouble, 0);
+                bool ok = CommandCapGet(_pSourceObject, (uint)eNkMAIDCapability.kNkMAIDCapability_FocalLength,
+                    eNkMAIDDataType.kNkMAIDDataType_FloatPtr, pDouble);
+                double val = ok ? BitConverter.Int64BitsToDouble(Marshal.ReadInt64(pDouble)) : 0;
+                Marshal.FreeHGlobal(pDouble);
+                return val;
+            }
+        }
+
         public bool GetIsAlive()
         {
             lock (_sdkLock)

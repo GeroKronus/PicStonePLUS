@@ -32,6 +32,8 @@ namespace PicStonePlus.Forms
             this.menuAutoFocus = new System.Windows.Forms.ToolStripMenuItem();
             this.menuLiveView = new System.Windows.Forms.ToolStripMenuItem();
             this.menuPresets = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuFerramentas = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuConfiguracoes = new System.Windows.Forms.ToolStripMenuItem();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.progressBar = new System.Windows.Forms.ToolStripProgressBar();
@@ -54,6 +56,7 @@ namespace PicStonePlus.Forms
             this.btnLiveView = new System.Windows.Forms.Button();
             this.chkAF = new System.Windows.Forms.CheckBox();
             this.btnRefresh = new System.Windows.Forms.Button();
+            this.btnPasta = new System.Windows.Forms.Button();
             this.grpSequencia = new System.Windows.Forms.GroupBox();
             this.lblSeqInput = new System.Windows.Forms.Label();
             this.txtSequencia = new System.Windows.Forms.TextBox();
@@ -61,6 +64,15 @@ namespace PicStonePlus.Forms
             this.rtbSequencia = new System.Windows.Forms.RichTextBox();
             this.lblSeqInfo = new System.Windows.Forms.Label();
             this.btnSeqUndo = new System.Windows.Forms.Button();
+            this.grpDadosChapa = new System.Windows.Forms.GroupBox();
+            this.lblEspessura = new System.Windows.Forms.Label();
+            this.cboEspessura = new System.Windows.Forms.ComboBox();
+            this.lblBloco = new System.Windows.Forms.Label();
+            this.txtBloco = new System.Windows.Forms.TextBox();
+            this.lblBundle = new System.Windows.Forms.Label();
+            this.txtBundle = new System.Windows.Forms.TextBox();
+            this.lblEstagio = new System.Windows.Forms.Label();
+            this.cboEstagio = new System.Windows.Forms.ComboBox();
             this.timerLiveView = new System.Windows.Forms.Timer(this.components);
             this.timerStatus = new System.Windows.Forms.Timer(this.components);
             this.menuStrip.SuspendLayout();
@@ -71,6 +83,7 @@ namespace PicStonePlus.Forms
             this.grpCameraInfo.SuspendLayout();
             this.grpPreset.SuspendLayout();
             this.grpSequencia.SuspendLayout();
+            this.grpDadosChapa.SuspendLayout();
             this.panelActions.SuspendLayout();
             this.SuspendLayout();
             //
@@ -78,7 +91,8 @@ namespace PicStonePlus.Forms
             //
             this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.menuArquivo,
-            this.menuCamera});
+            this.menuCamera,
+            this.menuFerramentas});
             this.menuStrip.Location = new System.Drawing.Point(0, 0);
             this.menuStrip.Name = "menuStrip";
             this.menuStrip.Size = new System.Drawing.Size(1200, 24);
@@ -165,6 +179,21 @@ namespace PicStonePlus.Forms
             this.menuPresets.Text = "&Presets de Material";
             this.menuPresets.Click += new System.EventHandler(this.btnPresets_Click);
             //
+            // menuFerramentas
+            //
+            this.menuFerramentas.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.menuConfiguracoes});
+            this.menuFerramentas.Name = "menuFerramentas";
+            this.menuFerramentas.Size = new System.Drawing.Size(84, 20);
+            this.menuFerramentas.Text = "&Ferramentas";
+            //
+            // menuConfiguracoes
+            //
+            this.menuConfiguracoes.Name = "menuConfiguracoes";
+            this.menuConfiguracoes.Size = new System.Drawing.Size(170, 22);
+            this.menuConfiguracoes.Text = "&Configura\u00E7\u00F5es...";
+            this.menuConfiguracoes.Click += new System.EventHandler(this.menuConfiguracoes_Click);
+            //
             // statusStrip
             //
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
@@ -231,6 +260,7 @@ namespace PicStonePlus.Forms
             //
             this.panelRight.AutoScroll = true;
             this.panelRight.Controls.Add(this.grpSequencia);
+            this.panelRight.Controls.Add(this.grpDadosChapa);
             this.panelRight.Controls.Add(this.grpPreset);
             this.panelRight.Controls.Add(this.grpCameraInfo);
             this.panelRight.Controls.Add(this.panelActions);
@@ -330,6 +360,89 @@ namespace PicStonePlus.Forms
             this.btnPresets.UseVisualStyleBackColor = true;
             this.btnPresets.Click += new System.EventHandler(this.btnPresets_Click);
             //
+            // grpDadosChapa
+            //
+            this.grpDadosChapa.Controls.Add(this.lblEstagio);
+            this.grpDadosChapa.Controls.Add(this.cboEstagio);
+            this.grpDadosChapa.Controls.Add(this.lblBundle);
+            this.grpDadosChapa.Controls.Add(this.txtBundle);
+            this.grpDadosChapa.Controls.Add(this.lblBloco);
+            this.grpDadosChapa.Controls.Add(this.txtBloco);
+            this.grpDadosChapa.Controls.Add(this.lblEspessura);
+            this.grpDadosChapa.Controls.Add(this.cboEspessura);
+            this.grpDadosChapa.Dock = System.Windows.Forms.DockStyle.Top;
+            this.grpDadosChapa.Location = new System.Drawing.Point(8, 163);
+            this.grpDadosChapa.Name = "grpDadosChapa";
+            this.grpDadosChapa.Padding = new System.Windows.Forms.Padding(8);
+            this.grpDadosChapa.Size = new System.Drawing.Size(479, 80);
+            this.grpDadosChapa.TabIndex = 4;
+            this.grpDadosChapa.TabStop = false;
+            this.grpDadosChapa.Text = "Dados da Chapa";
+            //
+            // lblEspessura
+            //
+            this.lblEspessura.Location = new System.Drawing.Point(12, 24);
+            this.lblEspessura.Name = "lblEspessura";
+            this.lblEspessura.Size = new System.Drawing.Size(55, 20);
+            this.lblEspessura.Text = "Esp(cm):";
+            //
+            // cboEspessura
+            //
+            this.cboEspessura.FormattingEnabled = true;
+            this.cboEspessura.Items.AddRange(new object[] { "1", "2", "3", "4", "5" });
+            this.cboEspessura.Location = new System.Drawing.Point(68, 22);
+            this.cboEspessura.Name = "cboEspessura";
+            this.cboEspessura.Size = new System.Drawing.Size(45, 23);
+            this.cboEspessura.SelectedIndex = 0;
+            this.cboEspessura.TabIndex = 0;
+            this.cboEspessura.SelectedIndexChanged += new System.EventHandler(this.cboEspessura_SelectedIndexChanged);
+            //
+            // lblBloco
+            //
+            this.lblBloco.Location = new System.Drawing.Point(120, 24);
+            this.lblBloco.Name = "lblBloco";
+            this.lblBloco.Size = new System.Drawing.Size(42, 20);
+            this.lblBloco.Text = "Bloco:";
+            //
+            // txtBloco
+            //
+            this.txtBloco.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
+            this.txtBloco.Location = new System.Drawing.Point(162, 22);
+            this.txtBloco.Name = "txtBloco";
+            this.txtBloco.Size = new System.Drawing.Size(80, 23);
+            this.txtBloco.TabIndex = 1;
+            this.txtBloco.Leave += new System.EventHandler(this.txtBloco_Leave);
+            //
+            // lblBundle
+            //
+            this.lblBundle.Location = new System.Drawing.Point(248, 24);
+            this.lblBundle.Name = "lblBundle";
+            this.lblBundle.Size = new System.Drawing.Size(48, 20);
+            this.lblBundle.Text = "Bundle:";
+            //
+            // txtBundle
+            //
+            this.txtBundle.Location = new System.Drawing.Point(296, 22);
+            this.txtBundle.Name = "txtBundle";
+            this.txtBundle.Size = new System.Drawing.Size(60, 23);
+            this.txtBundle.TabIndex = 2;
+            //
+            // lblEstagio
+            //
+            this.lblEstagio.Location = new System.Drawing.Point(12, 52);
+            this.lblEstagio.Name = "lblEstagio";
+            this.lblEstagio.Size = new System.Drawing.Size(55, 20);
+            this.lblEstagio.Text = "Est\u00E1gio:";
+            //
+            // cboEstagio
+            //
+            this.cboEstagio.FormattingEnabled = true;
+            this.cboEstagio.Location = new System.Drawing.Point(68, 50);
+            this.cboEstagio.Name = "cboEstagio";
+            this.cboEstagio.Size = new System.Drawing.Size(150, 23);
+            this.cboEstagio.TabIndex = 3;
+            this.cboEstagio.SelectedIndexChanged += new System.EventHandler(this.cboEstagio_SelectedIndexChanged);
+            //
             // grpSequencia
             //
             this.grpSequencia.Controls.Add(this.btnSeqUndo);
@@ -339,7 +452,7 @@ namespace PicStonePlus.Forms
             this.grpSequencia.Controls.Add(this.txtSequencia);
             this.grpSequencia.Controls.Add(this.lblSeqInput);
             this.grpSequencia.Dock = System.Windows.Forms.DockStyle.Top;
-            this.grpSequencia.Location = new System.Drawing.Point(8, 163);
+            this.grpSequencia.Location = new System.Drawing.Point(8, 253);
             this.grpSequencia.Name = "grpSequencia";
             this.grpSequencia.Padding = new System.Windows.Forms.Padding(8);
             this.grpSequencia.Size = new System.Drawing.Size(479, 200);
@@ -409,6 +522,7 @@ namespace PicStonePlus.Forms
             this.panelActions.Controls.Add(this.btnLiveView);
             this.panelActions.Controls.Add(this.chkAF);
             this.panelActions.Controls.Add(this.btnRefresh);
+            this.panelActions.Controls.Add(this.btnPasta);
             this.panelActions.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelActions.Location = new System.Drawing.Point(8, 586);
             this.panelActions.Name = "panelActions";
@@ -482,6 +596,16 @@ namespace PicStonePlus.Forms
             this.btnRefresh.UseVisualStyleBackColor = true;
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
             //
+            // btnPasta
+            //
+            this.btnPasta.Location = new System.Drawing.Point(120, 50);
+            this.btnPasta.Name = "btnPasta";
+            this.btnPasta.Size = new System.Drawing.Size(100, 28);
+            this.btnPasta.TabIndex = 21;
+            this.btnPasta.Text = "Pasta";
+            this.btnPasta.UseVisualStyleBackColor = true;
+            this.btnPasta.Click += new System.EventHandler(this.btnPasta_Click);
+            //
             // timerLiveView
             //
             this.timerLiveView.Interval = 33;
@@ -519,6 +643,8 @@ namespace PicStonePlus.Forms
             this.grpPreset.ResumeLayout(false);
             this.grpSequencia.ResumeLayout(false);
             this.grpSequencia.PerformLayout();
+            this.grpDadosChapa.ResumeLayout(false);
+            this.grpDadosChapa.PerformLayout();
             this.panelActions.ResumeLayout(false);
             this.ResumeLayout(false);
             this.PerformLayout();
@@ -560,6 +686,7 @@ namespace PicStonePlus.Forms
         private System.Windows.Forms.Button btnLiveView;
         private System.Windows.Forms.CheckBox chkAF;
         private System.Windows.Forms.Button btnRefresh;
+        private System.Windows.Forms.Button btnPasta;
         private System.Windows.Forms.Timer timerLiveView;
         private System.Windows.Forms.Timer timerStatus;
         private System.Windows.Forms.GroupBox grpSequencia;
@@ -569,5 +696,16 @@ namespace PicStonePlus.Forms
         private System.Windows.Forms.RichTextBox rtbSequencia;
         private System.Windows.Forms.Label lblSeqInfo;
         private System.Windows.Forms.Button btnSeqUndo;
+        private System.Windows.Forms.ToolStripMenuItem menuFerramentas;
+        private System.Windows.Forms.ToolStripMenuItem menuConfiguracoes;
+        private System.Windows.Forms.GroupBox grpDadosChapa;
+        private System.Windows.Forms.Label lblEspessura;
+        private System.Windows.Forms.ComboBox cboEspessura;
+        private System.Windows.Forms.Label lblBloco;
+        private System.Windows.Forms.TextBox txtBloco;
+        private System.Windows.Forms.Label lblBundle;
+        private System.Windows.Forms.TextBox txtBundle;
+        private System.Windows.Forms.Label lblEstagio;
+        private System.Windows.Forms.ComboBox cboEstagio;
     }
 }
